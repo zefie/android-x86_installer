@@ -46,6 +46,15 @@ if test x"$HAS_CTTY" != x"Yes"; then
 	mdev -s
 	# re-run this script with a controlling tty
 	exec env HAS_CTTY=Yes setsid cttyhack /bin/sh "$0" "$@"
+	for c in `cat /proc/cmdline`; do
+	case $c in
+		RECOVERY=*)
+			RECOVERY=$(echo $c | cut -d'=' -f2)
+			;;
+		*)
+			;;
+	esac
+done
 fi
 
 # now running under a controlling tty; debug output from stderr into log file
@@ -80,7 +89,23 @@ check_root()
 		dev=$1
 	fi
 	try_mount ro $dev /mnt || return 1
+	if [ ${RECOVERY} -eq 1 ]; then
+		mount -o remount,rw /mnt
+		touch /mnt/.rectest
+		if [ $? -ne 0 ]; then
+			# Not writable, return error
+			umount /mnt
+		return 1;
+		else
+			rm /mnt/.rectest
+			mount -o remount,ro /mnt
+		fi
+	fi
 	if [ -n "$iso" -a -e /mnt/$iso ]; then
+		if [ ${RECOVERY} -eq 1 ]; then
+			# Not writable, return error
+			return 1
+		fi
 		mount --move /mnt /iso
 		mkdir /mnt/iso
 		mount -o loop /iso/$iso /mnt/iso
@@ -110,6 +135,7 @@ check_root()
 	fi
 	mkdir -p mnt
 	echo " found at $1"
+	export BOOT_DRIVE=$1
 	rm /sbin/mke2fs
 	hash -r
 }
@@ -123,7 +149,7 @@ remount_rw()
 
 debug_shell()
 {
-	if [ -x system/bin/sh ]; then
+	if [ -x /system/bin/sh ]; then
 		echo Running MirBSD Korn Shell...
 		USER="($1)" system/bin/sh -l 2>&1
 	else
@@ -132,10 +158,18 @@ debug_shell()
 	fi
 }
 
-echo -n Detecting Android-x86...
+if [ ${RECOVERY} -eq 1 ]; then
+	echo -n Detecting writable Android-x86 for recovery...
+else
+	echo -n Detecting Android-x86...
+fi
 
 [ -z "$SRC" -a -n "$BOOT_IMAGE" ] && SRC=`dirname $BOOT_IMAGE`
-[ -z "$RAMDISK" ] && RAMDISK=ramdisk.img || RAMDISK=${RAMDISK##/dev/}
+if [ ${RECOVERY} -eq 1 ]; then
+	[ -z "$RAMDISK" ] && RAMDISK=ramdisk-recovery.img || RAMDISK=${RAMDISK##/dev/}
+else
+	[ -z "$RAMDISK" ] && RAMDISK=ramdisk.img || RAMDISK=${RAMDISK##/dev/}
+fi
 
 for c in `cat /proc/cmdline`; do
 	case $c in
@@ -159,12 +193,40 @@ while :; do
 done
 
 ln -s mnt/$SRC /src
+
+if [ ${RECOVERY} -eq 1 ]; then
+	mkdir /android/src
+	mount -o bind /src /android/src
+fi
+
 ln -s android/system /
-ln -s ../system/lib/firmware ../system/lib/modules /lib
+
+if [ ${RECOVERY} -eq 1 ]; then
+	# Ramdisk (uses independant modules)
+	ln -s /android/lib/firmware /android/lib/modules /lib
+else
+	# System (uses standard method)
+	ln -s ../system/lib/firmware ../system/lib/modules /lib
+fi
 
 if [ -n "$INSTALL" ]; then
 	zcat /src/install.img | ( cd /; cpio -iud > /dev/null )
 fi
+
+for c in `cat /proc/cmdline`; do
+	case $c in
+		uvesafb=*)
+			VALUE=$(echo ${c} | cut -d'=' -f2)
+			if [ "${VALUE}" == "1" ]; then
+				/bin/busybox modprobe uvesafb mtrr=3 scroll=redraw mode_option=1024x768-16 v86d=/android/sbin/v86d
+			else
+				/bin/busybox modprobe uvesafb mtrr=3 scroll=redraw mode_option=${VALUE} v86d=/android/sbin/v86d
+			fi
+			;;
+		*)
+			;;
+	esac
+done
 
 if [ -x system/bin/ln -a \( -n "$DEBUG" -o -n "$BUSYBOX" \) ]; then
 	mv /bin /lib .
@@ -202,6 +264,31 @@ mount_sdcard
 setup_tslib
 setup_dpi
 post_detect
+# Give devices time to appear...
+
+echo -n "Waiting for devices to settle"
+for f in $(seq 1 6); do
+	echo -n "."
+	sleep 1;
+done
+echo -e "\n";
+
+# If we need nwfermi, load it before switching
+# Because we cannot load it once in Android
+# due to it being a dynamically linked closed source binary
+
+if [ $(cat /sys/bus/*/devices/*/uevent | grep "PRODUCT=1926" | wc -l) -gt 0 ]; then
+	# There is a NextWindow device, so load and wait for nwfermi
+	# Although this is probably not the best way...
+	echo -n "Detected NextWindow TS: Loading support..."
+	modprobe nw-fermi
+	while [ $(ls -l /dev/nwfermi* | wc -l) -eq 0 ]; do
+		sleep 1
+		echo -n "."
+	done
+	echo -e " done.\n"
+	/sbin/nwfermi_daemon /daemon
+fi
 
 if [ 0$DEBUG -gt 1 ]; then
 	echo -e "\nUse Alt-F1/F2/F3 to switch between virtual consoles"
@@ -220,6 +307,11 @@ fi
 echo > /proc/sys/kernel/hotplug
 
 export ANDROID_ROOT=/system
+
+if [ ${RECOVERY} -eq 1 ]; then
+	printf '\033[?12l' > /dev/tty1
+	echo 0 > /sys/class/graphics/fbcon/cursor_blink
+fi
 
 exec ${SWITCH:-switch_root} /android /init
 
