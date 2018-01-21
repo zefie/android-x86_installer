@@ -290,16 +290,6 @@ setup_tslib
 setup_dpi
 post_detect
 
-if [ ! -z "${RECOVERY}" ]; then
-	# Manually process deferred modules, probably should be better
-	# But main core/init does not want to use our ramdisk, I don't think
-	if [ -f "/system/etc/modprobe.blacklist" ]; then
-		for f in $(cat "/system/etc/modprobe.blacklist" | grep "^deferred"); do
-			modprobe $(echo ${f} | rev | cut -d' ' -f1 | rev)
-		done
-	fi
-fi
-
 # Give devices time to appear...
 
 echo -n "Waiting for devices to settle"
