@@ -17,7 +17,7 @@ if [ ! -z "${RECOVERY_ISOBOOT}" ]; then
 	RECOVERY=${RECOVERY_ISOBOOT}
 fi
 
-PATH=/sbin:/bin:/system/bin:/system/xbin; export PATH
+export PATH=/sbin:/bin:/system/bin:/system/xbin;
 
 # configure debugging output
 if [ -n "$DEBUG" ]; then
@@ -122,32 +122,29 @@ check_root()
 			try_mount ro $dev /mnt || return 1
 			if [ -e /mnt/$SRC/$RAMDISK ]; then
 				zcat /mnt/$SRC/$RAMDISK | cpio -id > /dev/null
+				mount --move /mnt /iso
 				RAMDISK_LOCATED=1
 			fi
-			umount /mnt
 
 			# We always return 1 even if we got the ramdisk, because we want the RW.
 			# If it is the correct disk (such as hdd install), it will come back around.
 			# This could be improved.
 			return 1;
 		else
-			try_mount rw $dev /mnt || return 1
 			# TODO: Write a selection menu if more than one suspected install is found.
 			# Until then, only use first matching result.
 
-	                if [ $(ls -1 /mnt/*/system.sfs | head -n1 | wc -l) -gt 0 ]; then
-	                        mount -o loop,noatime $(ls -1 /mnt/*/system.sfs | head -n1) /sfs
-	                        mount -o loop,noatime /sfs/system.img system
-        	        elif [ $(ls -1 /mnt/*/system.img | head -n1 | wc -l) ]; then
-	                        remount_rw
+			try_mount rw $dev /mnt || return 1
+			if [ $(ls -1 /mnt/*/system.img | head -n1 | wc -l) -ne 0 ]; then
+				mount -o loop,noatime $(ls -1 /mnt/*/system.sfs | head -n1) /sfs
+				mount -o loop,noatime /sfs/system.img system
+        	        elif [ $(ls -1 /mnt/*/system.img | head -n1 | wc -l) -ne 0 ]; then
 	                        mount -o loop,noatime $(ls -1 /mnt/*/system.img | head -n1) system
-	                elif [ -d $(ls -1 /mnt/*/system | head -n1 | wc -l) ]; then
-	                        remount_rw
-	                        mount --bind $(ls -1 /mnt/*/system | head -n1) system
+	                elif [ $(ls -1d /mnt/*/system | head -n1 | wc -l) -ne 0 ]; then
+	                        mount --bind $(ls -1d /mnt/*/system | head -n1) system
 	                elif [ -e /mnt/build.prop ]; then
 	                        mount --bind /mnt system
         	        else
-	                        rm -rf *
 	                        return 1
 	                fi
 		fi
@@ -231,14 +228,6 @@ if [ -n "$INSTALL" ]; then
 	zcat /src/install.img | ( cd /; cpio -iud > /dev/null )
 fi
 
-if [ ! -z "${UVESAFB}" ]; then
-	if [ "${UVESAFB}" == "1" ]; then
-		/bin/busybox modprobe uvesafb mtrr=3 scroll=redraw mode_option=1024x768-16 v86d=/android/sbin/v86d
-	else
-		/bin/busybox modprobe uvesafb mtrr=3 scroll=redraw mode_option=${VALUE} v86d=/android/sbin/v86d
-	fi
-fi
-
 if [ -x system/bin/ln -a \( -n "$DEBUG" -o -n "$BUSYBOX" \) ]; then
 	mv /bin /lib .
 	sed -i 's|\( PATH.*\)|\1:/bin|' init.environ.rc
@@ -247,6 +236,14 @@ if [ -x system/bin/ln -a \( -n "$DEBUG" -o -n "$BUSYBOX" \) ]; then
 	rmdir /sbin
 	ln -s android/bin android/lib android/sbin /
 	hash -r
+fi
+
+if [ ! -z "${UVESAFB}" ]; then
+	if [ "${UVESAFB}" == "1" ]; then
+		modprobe uvesafb mtrr=3 scroll=redraw mode_option=1024x768-16 v86d=/android/sbin/v86d
+	else
+		modprobe uvesafb mtrr=3 scroll=redraw mode_option=${UVESAFB} v86d=/android/sbin/v86d
+	fi
 fi
 
 # load scripts
@@ -292,7 +289,7 @@ if [ $(cat /sys/bus/*/devices/*/uevent | grep "PRODUCT=1926" | wc -l) -gt 0 ]; t
 	# There is a NextWindow device, so load and wait for nwfermi
 	# Although this is probably not the best way...
 	echo -n "Detected NextWindow TS: Loading support..."
-	modprobe nw-fermi
+	/bin/busybox modprobe nw-fermi
 	while [ $(ls -l /dev/nwfermi* | wc -l) -eq 0 ]; do
 		sleep 1
 		echo -n "."
