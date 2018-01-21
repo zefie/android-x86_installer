@@ -13,6 +13,10 @@
 # Forcefully disable install on TWRP ISO
 INSTALL=0
 
+if [ ! -z "${RECOVERY_ISOBOOT}" ]; then
+	RECOVERY=${RECOVERY_ISOBOOT}
+fi
+
 PATH=/sbin:/bin:/system/bin:/system/xbin; export PATH
 
 # configure debugging output
@@ -82,59 +86,74 @@ check_root()
 	else
 		dev=$1
 	fi
+
+	if [ -z "${RECOVERY_ISOBOOT}" ]; then
 		try_mount ro $dev /mnt || return 1
 		if [ -n "$iso" -a -e /mnt/$iso ]; then
-			SRC=iso
 			mount --move /mnt /iso
-		else
-			umount /mnt
-		fi
-		if [ -z "${RECOVERY}" ];
 			mkdir /mnt/iso
 			mount -o loop /iso/$iso /mnt/iso
+			SRC=iso
 		fi
-
-		if [ ! -z "${RECOVERY}" ];
-			try_mount rw $dev /mnt || return 1
-			touch /mnt/.rectest
-			if [ $? -ne 0 ]; then
-				# Not writable, return error
-				umount /mnt
-				return 1;
-			else
-				rm /mnt/.rectest
-				mount -o remount,ro /mnt
+		if [ -e /mnt/$SRC/$RAMDISK ]; then
+			zcat /mnt/$SRC/$RAMDISK | cpio -id > /dev/null
+		elif [ -b /dev/$RAMDISK ]; then
+			zcat /dev/$RAMDISK | cpio -id > /dev/null
+		else
+			return 1
+		fi
+		if [ -e /mnt/$SRC/system.sfs ]; then
+			mount -o loop,noatime /mnt/$SRC/system.sfs /sfs
+			mount -o loop,noatime /sfs/system.img system
+		elif [ -e /mnt/$SRC/system.img ]; then
+			remount_rw
+			mount -o loop,noatime /mnt/$SRC/system.img system
+		elif [ -d /mnt/$SRC/system ]; then
+			remount_rw
+			mount --bind /mnt/$SRC/system system
+		elif [ -e /mnt/build.prop ]; then
+			mount --bind /mnt system
+		else
+			rm -rf *
+			return 1
+		fi
+	else
+		if [ -z "${RAMDISK_LOCATED}" ]; then
+			try_mount ro $dev /mnt || return 1
+			if [ -e /mnt/$SRC/$RAMDISK ]; then
+				zcat /mnt/$SRC/$RAMDISK | cpio -id > /dev/null
+				RAMDISK_LOCATED=1
 			fi
+			umount /mnt
+
+			# We always return 1 even if we got the ramdisk, because we want the RW.
+			# If it is the correct disk (such as hdd install), it will come back around.
+			# This could be improved.
+			return 1;
+		else
+			try_mount rw $dev /mnt || return 1
+			# TODO: Write a selection menu if more than one suspected install is found.
+			# Until then, only use first matching result.
+
+	                if [ $(ls -1 /mnt/*/system.sfs | head -n1 | wc -l) -gt 0 ]; then
+	                        mount -o loop,noatime $(ls -1 /mnt/*/system.sfs | head -n1) /sfs
+	                        mount -o loop,noatime /sfs/system.img system
+        	        elif [ $(ls -1 /mnt/*/system.img | head -n1 | wc -l) ]; then
+	                        remount_rw
+	                        mount -o loop,noatime $(ls -1 /mnt/*/system.img | head -n1) system
+	                elif [ -d $(ls -1 /mnt/*/system | head -n1 | wc -l) ]; then
+	                        remount_rw
+	                        mount --bind $(ls -1 /mnt/*/system | head -n1) system
+	                elif [ -e /mnt/build.prop ]; then
+	                        mount --bind /mnt system
+        	        else
+	                        rm -rf *
+	                        return 1
+	                fi
 		fi
-	fi
-	if [ -e /mnt/$SRC/$RAMDISK ]; then
-		zcat /mnt/$SRC/$RAMDISK | cpio -id > /dev/null
-	elif [ -b /dev/$RAMDISK ]; then
-		zcat /dev/$RAMDISK | cpio -id > /dev/null
-	else
-		return 1
-	fi
-	if [ ! -z "${RECOVERY}" ]; then
-		SRC=
-	fi
-	if [ -e /mnt/$SRC/system.sfs ]; then
-		mount -o loop,noatime /mnt/$SRC/system.sfs /sfs
-		mount -o loop,noatime /sfs/system.img system
-	elif [ -e /mnt/$SRC/system.img ]; then
-		remount_rw
-		mount -o loop,noatime /mnt/$SRC/system.img system
-	elif [ -d /mnt/$SRC/system ]; then
-		remount_rw
-		mount --bind /mnt/$SRC/system system
-	elif [ -e /mnt/build.prop ]; then
-		mount --bind /mnt system
-	else
-		rm -rf *
-		return 1
 	fi
 	mkdir -p mnt
 	echo " found at $1"
-	export BOOT_DRIVE=$1
 	rm /sbin/mke2fs
 	hash -r
 }
@@ -157,14 +176,14 @@ debug_shell()
 	fi
 }
 
-if [ ${RECOVERY} -eq 1 ]; then
+if [ ! -z "${RECOVERY}" ]; then
 	echo -n Detecting writable Android-x86 for recovery...
 else
 	echo -n Detecting Android-x86...
 fi
 
 [ -z "$SRC" -a -n "$BOOT_IMAGE" ] && SRC=`dirname $BOOT_IMAGE`
-if [ ${RECOVERY} -eq 1 ]; then
+if [ ! -z "${RECOVERY}" ]; then
 	[ -z "$RAMDISK" ] && RAMDISK=ramdisk-recovery.img || RAMDISK=${RAMDISK##/dev/}
 else
 	[ -z "$RAMDISK" ] && RAMDISK=ramdisk.img || RAMDISK=${RAMDISK##/dev/}
@@ -193,14 +212,14 @@ done
 
 ln -s mnt/$SRC /src
 
-if [ ${RECOVERY} -eq 1 ]; then
+if [ ! -z "${RECOVERY}" ]; then
 	mkdir /android/src
 	mount -o bind /src /android/src
 fi
 
 ln -s android/system /
 
-if [ ${RECOVERY} -eq 1 ]; then
+if [ ! -z "${RECOVERY}" ]; then
 	# Ramdisk (uses independant modules)
 	ln -s /android/lib/firmware /android/lib/modules /lib
 else
@@ -300,7 +319,7 @@ echo > /proc/sys/kernel/hotplug
 
 export ANDROID_ROOT=/system
 
-if [ ${RECOVERY} -eq 1 ]; then
+if [ ! -z "${UVESAFB}" ]; then
 	printf '\033[?12l' > /dev/tty1
 	echo 0 > /sys/class/graphics/fbcon/cursor_blink
 fi
