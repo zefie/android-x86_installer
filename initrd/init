@@ -11,10 +11,10 @@
 #
 
 # Forcefully disable install on TWRP ISO
-INSTALL=0
+export INSTALL=0
 
 if [ ! -z "${RECOVERY_ISOBOOT}" ]; then
-	RECOVERY=${RECOVERY_ISOBOOT}
+	export RECOVERY=${RECOVERY_ISOBOOT}
 fi
 
 export PATH=/sbin:/bin:/system/bin:/system/xbin;
@@ -120,9 +120,12 @@ check_root()
 	else
 		if [ -z "${RAMDISK_LOCATED}" ]; then
 			try_mount ro $dev /mnt || return 1
-			if [ -e /mnt/$SRC/$RAMDISK ]; then
-				zcat /mnt/$SRC/$RAMDISK | cpio -id > /dev/null
+			if [ -e /mnt/$RAMDISK ]; then
+				echo " found at $1"
+				echo "Extracting recovery ramdisk..."
 				mount --move /mnt /iso
+				zcat /iso/$RAMDISK | cpio -id > /dev/null
+				echo -n "Detecting writable Android-x86 for recovery..."
 				RAMDISK_LOCATED=1
 			fi
 
@@ -135,14 +138,21 @@ check_root()
 			# Until then, only use first matching result.
 
 			try_mount rw $dev /mnt || return 1
-			if [ $(ls -1 /mnt/*/system.img | head -n1 | wc -l) -ne 0 ]; then
-				mount -o loop,noatime $(ls -1 /mnt/*/system.sfs | head -n1) /sfs
+			if [ $(ls -1 /mnt/*/system.sfs | head -n1 | wc -l) -ne 0 ]; then
+				REC_SYS_PATH=$(ls -1 /mnt/*/system.sfs | head -n1)
+				SRC=$(echo ${REC_SYS_PATH} | cut -d'/' -f3)
+				mount -o loop,noatime ${REC_SYS_PATH} /sfs
 				mount -o loop,noatime /sfs/system.img system
         	        elif [ $(ls -1 /mnt/*/system.img | head -n1 | wc -l) -ne 0 ]; then
-	                        mount -o loop,noatime $(ls -1 /mnt/*/system.img | head -n1) system
+				REC_SYS_PATH=$(ls -1 /mnt/*/system.img | head -n1)
+				SRC=$(echo ${REC_SYS_PATH} | cut -d'/' -f3)
+	                        mount -o loop,noatime ${REC_SYS_PATH} system
 	                elif [ $(ls -1d /mnt/*/system | head -n1 | wc -l) -ne 0 ]; then
-	                        mount --bind $(ls -1d /mnt/*/system | head -n1) system
+				REC_SYS_PATH=$(ls -1d /mnt/*/system | head -n1)
+				SRC=$(echo ${REC_SYS_PATH} | cut -d'/' -f3)
+	                        mount --bind ${REC_SYS_PATH} system
 	                elif [ -e /mnt/build.prop ]; then
+				SRC=
 	                        mount --bind /mnt system
         	        else
 	                        return 1
@@ -164,7 +174,7 @@ remount_rw()
 
 debug_shell()
 {
-	if [ -x /system/bin/sh ]; then
+	if [ -x system/bin/sh ]; then
 		echo Running MirBSD Korn Shell...
 		USER="($1)" system/bin/sh -l 2>&1
 	else
@@ -174,16 +184,16 @@ debug_shell()
 }
 
 if [ ! -z "${RECOVERY}" ]; then
-	echo -n Detecting writable Android-x86 for recovery...
+	echo -n Locating recovery ramdisk...
 else
 	echo -n Detecting Android-x86...
 fi
 
 [ -z "$SRC" -a -n "$BOOT_IMAGE" ] && SRC=`dirname $BOOT_IMAGE`
-if [ ! -z "${RECOVERY}" ]; then
-	[ -z "$RAMDISK" ] && RAMDISK=ramdisk-recovery.img || RAMDISK=${RAMDISK##/dev/}
-else
+if [ -z "${RECOVERY}" ]; then
 	[ -z "$RAMDISK" ] && RAMDISK=ramdisk.img || RAMDISK=${RAMDISK##/dev/}
+else
+	[ -z "$RAMDISK" ] && RAMDISK=ramdisk-recovery.img || RAMDISK=${RAMDISK##/dev/}
 fi
 
 for c in `cat /proc/cmdline`; do
@@ -231,10 +241,17 @@ fi
 if [ -x system/bin/ln -a \( -n "$DEBUG" -o -n "$BUSYBOX" \) ]; then
 	mv /bin /lib .
 	sed -i 's|\( PATH.*\)|\1:/bin|' init.environ.rc
+	if [ ! -z "${RECOVERY}" ]; then
+		mv /sbin/modprobe /modprobe.tmp
+	fi
 	rm /sbin/modprobe
 	busybox mv /sbin/* sbin
 	rmdir /sbin
 	ln -s android/bin android/lib android/sbin /
+	if [ ! -z "${RECOVERY}" ]; then
+		rm /sbin/modprobe
+		mv /modprobe.tmp /sbin/modprobe
+	fi
 	hash -r
 fi
 
