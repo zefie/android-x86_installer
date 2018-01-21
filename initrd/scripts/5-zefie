@@ -1,0 +1,9 @@
+sameline() {
+	LEN=$(echo ${1} | wc -c)
+	BLANK=$(expr ${COLUMNS} - ${LEN})
+	echo -ne "\r${1}"
+	if [ ${BLANK} -gt 0 ]; then
+		printf ' %.0s' $(seq 1 ${BLANK})
+	fi
+	echo -ne "\r"
+}

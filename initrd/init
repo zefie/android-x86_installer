@@ -290,23 +290,24 @@ setup_tslib
 setup_dpi
 post_detect
 
-# Give devices time to appear...
-
-echo -n "Waiting for devices to settle"
-for f in $(seq 1 6); do
-	echo -n "."
-	sleep 1;
-done
-echo -e "\n";
-
 # If we need nwfermi, load it before switching
 # Because we cannot load it once in Android
 # due to it being a dynamically linked closed source binary
 
 if [ $(cat /sys/bus/*/devices/*/uevent | grep "PRODUCT=1926" | wc -l) -gt 0 ]; then
+	echo "Detected NextWindow TS."
+
+	# For some reason, if we don't do this, nwfermi touch doesnt work in userland
+	WAITTIME=${FERMI_WAIT:-10}
+	for f in $(seq 1 ${WAITTIME}); do
+		sameline "Waiting for devices to settle: $(expr ${WAITTIME} - ${f})..."
+		sleep 1;
+	done
+	echo -e "\n";
+
 	# There is a NextWindow device, so load and wait for nwfermi
 	# Although this is probably not the best way...
-	echo -n "Detected NextWindow TS: Loading support..."
+	echo -n "Loading nwfermi support daemon..."
 	modprobe nw-fermi
 	while [ $(ls -l /dev/nwfermi* | wc -l) -eq 0 ]; do
 		sleep 1
