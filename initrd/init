@@ -289,7 +289,7 @@ if [ $(cat /sys/bus/*/devices/*/uevent | grep "PRODUCT=1926" | wc -l) -gt 0 ]; t
 	# There is a NextWindow device, so load and wait for nwfermi
 	# Although this is probably not the best way...
 	echo -n "Detected NextWindow TS: Loading support..."
-	/bin/busybox modprobe nw-fermi
+	modprobe nw-fermi
 	while [ $(ls -l /dev/nwfermi* | wc -l) -eq 0 ]; do
 		sleep 1
 		echo -n "."
