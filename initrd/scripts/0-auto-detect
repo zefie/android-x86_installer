@@ -31,6 +31,6 @@ load_modules()
 
 	# 3G modules
 	for m in $EXTMOD; do
-		busybox modprobe $m
+		/sbin/modprobe $m
 	done
 }
