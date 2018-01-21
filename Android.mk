@@ -48,11 +48,9 @@ initrd_bin := \
 	$(initrd_dir)/init \
 	$(wildcard $(initrd_dir)/*/*)
 
-systemimg  := $(PRODUCT_OUT)/system.$(if $(MKSQUASHFS),sfs,img)
-$(if $(MKSQUASHFS),$(systemimg): | $(MKSQUASHFS))
 
 INITRD_RAMDISK := $(PRODUCT_OUT)/initrd.img
-$(INITRD_RAMDISK): $(initrd_bin) $(systemimg) $(TARGET_INITRD_SCRIPTS) | $(ACP) $(MKBOOTFS)
+$(INITRD_RAMDISK): $(initrd_bin) $(TARGET_INITRD_SCRIPTS) | $(ACP) $(MKBOOTFS)
 	rm -rf $(TARGET_INSTALLER_OUT)
 	$(ACP) -pr $(initrd_dir) $(TARGET_INSTALLER_OUT)
 	$(if $(TARGET_INITRD_SCRIPTS),$(ACP) -p $(TARGET_INITRD_SCRIPTS) $(TARGET_INSTALLER_OUT)/scripts)
@@ -63,18 +61,13 @@ $(INITRD_RAMDISK): $(initrd_bin) $(systemimg) $(TARGET_INITRD_SCRIPTS) | $(ACP) 
 	$(if $(PREV_VERS),echo "PREV_VERS=\"$(PREV_VERS)\"" >> $(TARGET_INSTALLER_OUT)/scripts/00-ver)
 	$(MKBOOTFS) $(TARGET_INSTALLER_OUT) | gzip -9 > $@
 
-INSTALL_RAMDISK := $(PRODUCT_OUT)/install.img
-$(INSTALL_RAMDISK): $(wildcard $(LOCAL_PATH)/install/*/* $(LOCAL_PATH)/install/*/*/*/*) | $(MKBOOTFS)
-	$(if $(TARGET_INSTALL_SCRIPTS),$(ACP) -p $(TARGET_INSTALL_SCRIPTS) $(TARGET_INSTALLER_OUT)/scripts)
-	$(MKBOOTFS) $(dir $(dir $(<D))) | gzip -9 > $@
-
 boot_dir := $(PRODUCT_OUT)/boot
-$(boot_dir): $(shell find $(LOCAL_PATH)/boot -type f | sort -r) $(systemimg) $(INSTALL_RAMDISK) $(GENERIC_X86_CONFIG_MK) | $(ACP)
+$(boot_dir): $(shell find $(LOCAL_PATH)/boot -type f | sort -r) $(INSTALL_RAMDISK) $(GENERIC_X86_CONFIG_MK) | $(ACP)
 	$(hide) rm -rf $@
 	$(ACP) -pr $(dir $(<D)) $@
 	$(ACP) -pr $(dir $(<D))../install/grub2/efi $@
 
-BUILT_IMG := $(addprefix $(PRODUCT_OUT)/,ramdisk.img initrd.img install.img) $(systemimg)
+BUILT_IMG := $(addprefix $(PRODUCT_OUT)/,initrd.img) $(addprefix $(PRODUCT_OUT)/,ramdisk-recovery.img)
 BUILT_IMG += $(if $(TARGET_PREBUILT_KERNEL),$(TARGET_PREBUILT_KERNEL),$(PRODUCT_OUT)/kernel)
 
 ISO_IMAGE := $(PRODUCT_OUT)/$(TARGET_PRODUCT).iso
@@ -84,7 +77,7 @@ $(ISO_IMAGE): $(boot_dir) $(BUILT_IMG)
 	$(hide) sed -i "s|VER|$(VER)|; s|CMDLINE|$(BOARD_KERNEL_CMDLINE)|" $</boot/grub/grub.cfg
 	genisoimage -vJURT -b isolinux/isolinux.bin -c isolinux/boot.cat \
 		-no-emul-boot -boot-load-size 4 -boot-info-table -eltorito-alt-boot -e boot/grub/efi.img -no-emul-boot \
-		-input-charset utf-8 -V "Android-x86 LiveCD" -o $@ $^
+		-input-charset utf-8 -V "TWRP for Android-x86 LiveCD" -o $@ $^
 	$(hide) isohybrid --uefi $@ || echo -e "isohybrid not found.\nInstall syslinux 4.0 or higher if you want to build a usb bootable iso."
 	@echo -e "\n\n$@ is built successfully.\n\n"
 
@@ -92,7 +85,7 @@ rpm: $(wildcard $(LOCAL_PATH)/rpm/*) $(BUILT_IMG)
 	@echo ----- Making an rpm ------
 	OUT=$(abspath $(PRODUCT_OUT)); mkdir -p $$OUT/rpm/BUILD; rm -rf $$OUT/rpm/RPMS/*; $(ACP) $< $$OUT; \
 	rpmbuild -bb --target=$(if $(filter x86,$(TARGET_ARCH)),i686,x86_64) -D"cmdline $(BOARD_KERNEL_CMDLINE)" \
-		-D"_topdir $$OUT/rpm" -D"_sourcedir $$OUT" -D"systemimg $(notdir $(systemimg))" -D"ver $(VER)" \
+		-D"_topdir $$OUT/rpm" -D"_sourcedir $$OUT" -D"ver $(VER)" \
 		$(if $(BUILD_NAME_VARIANT),-D"name $(BUILD_NAME_VARIANT)") \
 		-D"install_prefix $(if $(INSTALL_PREFIX),$(INSTALL_PREFIX),android-$(VER))" $(filter %.spec,$^); \
 	mv $$OUT/rpm/RPMS/*/*.rpm $$OUT

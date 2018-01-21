@@ -10,6 +10,9 @@
 # with Android-x86 project.
 #
 
+# Forcefully disable install on TWRP ISO
+INSTALL=0
+
 PATH=/sbin:/bin:/system/bin:/system/xbin; export PATH
 
 # configure debugging output
@@ -46,15 +49,6 @@ if test x"$HAS_CTTY" != x"Yes"; then
 	mdev -s
 	# re-run this script with a controlling tty
 	exec env HAS_CTTY=Yes setsid cttyhack /bin/sh "$0" "$@"
-	for c in `cat /proc/cmdline`; do
-	case $c in
-		RECOVERY=*)
-			RECOVERY=$(echo $c | cut -d'=' -f2)
-			;;
-		*)
-			;;
-	esac
-done
 fi
 
 # now running under a controlling tty; debug output from stderr into log file
@@ -88,28 +82,30 @@ check_root()
 	else
 		dev=$1
 	fi
-	try_mount ro $dev /mnt || return 1
-	if [ ${RECOVERY} -eq 1 ]; then
-		mount -o remount,rw /mnt
-		touch /mnt/.rectest
-		if [ $? -ne 0 ]; then
-			# Not writable, return error
-			umount /mnt
-		return 1;
+		try_mount ro $dev /mnt || return 1
+		if [ -n "$iso" -a -e /mnt/$iso ]; then
+			SRC=iso
+			mount --move /mnt /iso
 		else
-			rm /mnt/.rectest
-			mount -o remount,ro /mnt
+			umount /mnt
 		fi
-	fi
-	if [ -n "$iso" -a -e /mnt/$iso ]; then
-		if [ ${RECOVERY} -eq 1 ]; then
-			# Not writable, return error
-			return 1
+		if [ -z "${RECOVERY}" ];
+			mkdir /mnt/iso
+			mount -o loop /iso/$iso /mnt/iso
 		fi
-		mount --move /mnt /iso
-		mkdir /mnt/iso
-		mount -o loop /iso/$iso /mnt/iso
-		SRC=iso
+
+		if [ ! -z "${RECOVERY}" ];
+			try_mount rw $dev /mnt || return 1
+			touch /mnt/.rectest
+			if [ $? -ne 0 ]; then
+				# Not writable, return error
+				umount /mnt
+				return 1;
+			else
+				rm /mnt/.rectest
+				mount -o remount,ro /mnt
+			fi
+		fi
 	fi
 	if [ -e /mnt/$SRC/$RAMDISK ]; then
 		zcat /mnt/$SRC/$RAMDISK | cpio -id > /dev/null
@@ -117,6 +113,9 @@ check_root()
 		zcat /dev/$RAMDISK | cpio -id > /dev/null
 	else
 		return 1
+	fi
+	if [ ! -z "${RECOVERY}" ]; then
+		SRC=
 	fi
 	if [ -e /mnt/$SRC/system.sfs ]; then
 		mount -o loop,noatime /mnt/$SRC/system.sfs /sfs
@@ -213,20 +212,13 @@ if [ -n "$INSTALL" ]; then
 	zcat /src/install.img | ( cd /; cpio -iud > /dev/null )
 fi
 
-for c in `cat /proc/cmdline`; do
-	case $c in
-		uvesafb=*)
-			VALUE=$(echo ${c} | cut -d'=' -f2)
-			if [ "${VALUE}" == "1" ]; then
-				/bin/busybox modprobe uvesafb mtrr=3 scroll=redraw mode_option=1024x768-16 v86d=/android/sbin/v86d
-			else
-				/bin/busybox modprobe uvesafb mtrr=3 scroll=redraw mode_option=${VALUE} v86d=/android/sbin/v86d
-			fi
-			;;
-		*)
-			;;
-	esac
-done
+if [ ! -z "${UVESAFB}" ]; then
+	if [ "${UVESAFB}" == "1" ]; then
+		/bin/busybox modprobe uvesafb mtrr=3 scroll=redraw mode_option=1024x768-16 v86d=/android/sbin/v86d
+	else
+		/bin/busybox modprobe uvesafb mtrr=3 scroll=redraw mode_option=${VALUE} v86d=/android/sbin/v86d
+	fi
+fi
 
 if [ -x system/bin/ln -a \( -n "$DEBUG" -o -n "$BUSYBOX" \) ]; then
 	mv /bin /lib .
