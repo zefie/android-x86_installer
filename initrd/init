@@ -305,7 +305,7 @@ if [ $(cat /sys/bus/*/devices/*/uevent | grep "PRODUCT=1926" | wc -l) -gt 0 ]; t
 	# There is a NextWindow device, so load and wait for nwfermi
 	# Although this is probably not the best way...
 	modprobe nwfermi
-	if [ $(ls -l /dev/nwfermi* | wc -l) -eq 0 ]; then
+	if [ $(ls -l /dev/nwfermi* | wc -l) -gt 0 ]; then
 		echo "Loading nwfermi support daemon..."
 		/android/sbin/nwfermi_daemon /daemon
 	fi
